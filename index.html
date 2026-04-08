@@ -6,7 +6,7 @@
 <title>History of Science — Field Map</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  html, body, #root { height: 100%; }
+  html, body, #root { height: 100%; width: 100%; overflow-x: hidden; }
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
@@ -59,7 +59,7 @@ function solveLabels(nodes, dims) {
     w: n.a.length * 6.2 + 8, h: 13,
     anchor: "start",
   }));
-  // Iterative push
+  // Iterative push + spring back toward origin
   for (let iter = 0; iter < 60; iter++) {
     let moved = false;
     for (let i = 0; i < labels.length; i++) {
@@ -77,8 +77,21 @@ function solveLabels(nodes, dims) {
         }
       }
     }
+    // Spring: pull each label back toward its dot origin
+    for (let i = 0; i < labels.length; i++) {
+      const l = labels[i];
+      const drift = l.y - l.oy;
+      if (Math.abs(drift) > 1) {
+        l.y -= drift * 0.15;
+      }
+    }
     if (!moved) break;
   }
+  // Hard clamp: never let a label drift more than 40px from its dot
+  labels.forEach(l => {
+    const maxDrift = 40;
+    l.y = Math.max(l.oy - maxDrift, Math.min(l.oy + maxDrift, l.y));
+  });
   // Flip labels to left if they'd go off-screen
   labels.forEach(l => {
     if (l.x + l.w > dims.w - 10) {
@@ -105,7 +118,9 @@ function HoSMap() {
   const [showConns, setShowConns] = useState(true);
   const [showWaves, setShowWaves] = useState(true);
   const containerRef = useRef(null);
-  const [dims, setDims] = useState({ w: 1100, h: 750 });
+  const [dims, setDims] = useState({ w: window.innerWidth, h: 750 });
+  const [panelPos, setPanelPos] = useState(null); // {x, y} when user drags
+  const dragRef = useRef(null); // {startX, startY, origX, origY} during drag
 
   /* ── Load CSVs ── */
   useEffect(() => {
@@ -151,13 +166,129 @@ function HoSMap() {
     return () => obs.disconnect();
   }, []);
 
-  const m = { top: 70, right: 50, bottom: 55, left: 75 };
+  /* ── Drag handlers for detail panel ── */
+  useEffect(() => {
+    const onMove = (e) => {
+      if (!dragRef.current) return;
+      const { startX, startY, origX, origY } = dragRef.current;
+      setPanelPos({ x: origX + e.clientX - startX, y: origY + e.clientY - startY });
+    };
+    const onUp = () => { dragRef.current = null; };
+    const onKey = (e) => { if (e.key === "Escape") { setSelected(null); setPanelPos(null); } };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    window.addEventListener("keydown", onKey);
+    return () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); window.removeEventListener("keydown", onKey); };
+  }, []);
+  const onPanelMouseDown = (e) => {
+    // Don't drag if clicking a button or link
+    if (e.target.tagName === "BUTTON") return;
+    const panelEl = e.currentTarget;
+    const rect = panelEl.getBoundingClientRect();
+    dragRef.current = { startX: e.clientX, startY: e.clientY, origX: rect.left, origY: rect.top };
+    e.preventDefault();
+  };
+
+  const m = { top: 20, right: 10, bottom: 55, left: 60 };
   const pw = dims.w - m.left - m.right;
   const ph = dims.h - m.top - m.bottom;
-  const xMin = 1960, xMax = 2028, yMin = 1100, yMax = 2030;
+  /* ── Density-proportional y-axis using 50-year bins ── */
+  const yBinSize = 50;
+  const yBins = useMemo(() => {
+    // Count books per 50-year bin based on historical midpoint
+    const counts = {};
+    books.forEach(b => {
+      const mid = (b.h0 + b.h1) / 2;
+      const bs = Math.floor(mid / yBinSize) * yBinSize;
+      counts[bs] = (counts[bs] || 0) + 1;
+    });
+    const binStarts = Object.keys(counts).map(Number).sort((a, b) => a - b);
+    if (binStarts.length === 0) return [];
+    // Fill gaps so every 50-year period is represented
+    const allBins = [];
+    for (let s = binStarts[0]; s <= binStarts[binStarts.length - 1]; s += yBinSize) {
+      allBins.push({ start: s, count: counts[s] || 0 });
+    }
+    // Weight: proportional to max(1, count)
+    const minWeight = 1;
+    const totalWeight = allBins.reduce((s, b) => s + Math.max(minWeight, b.count), 0);
+    const padTop = 10, padBot = 10;
+    const usable = ph - padTop - padBot;
+    // y-axis is inverted: early periods (small year) at bottom (large pixel y)
+    // so bin with smallest year starts at bottom
+    let cum = 0;
+    allBins.forEach(bin => {
+      const w = Math.max(minWeight, bin.count);
+      // y1 = bottom edge (larger pixel y), y0 = top edge (smaller pixel y)
+      bin.py1 = m.top + padTop + ph - padBot - (cum / totalWeight) * usable;
+      cum += w;
+      bin.py0 = m.top + padTop + ph - padBot - (cum / totalWeight) * usable;
+    });
+    return allBins;
+  }, [books, m.top, ph]);
 
-  const xScale = useCallback(v => m.left + ((v - xMin) / (xMax - xMin)) * pw, [pw, m.left]);
-  const yScale = useCallback(v => m.top + ph - ((v - yMin) / (yMax - yMin)) * ph, [ph, m.top]);
+  const yScale = useCallback(v => {
+    if (yBins.length === 0) return m.top;
+    const bs = Math.floor(v / yBinSize) * yBinSize;
+    const bin = yBins.find(b => b.start === bs);
+    if (!bin) {
+      if (v < yBins[0].start) return yBins[0].py1; // below first bin = bottom
+      return yBins[yBins.length - 1].py0; // above last bin = top
+    }
+    // Interpolate within bin
+    const t = (v - bin.start) / yBinSize;
+    return bin.py1 + t * (bin.py0 - bin.py1);
+  }, [yBins, m.top]);
+
+  /* ── Density-proportional x-axis using 5-year bins ── */
+  const binSize = 5;
+  const xBins = useMemo(() => {
+    // Count books per 5-year bin
+    const counts = {};
+    books.forEach(b => {
+      const bs = Math.floor(b.yr / binSize) * binSize;
+      counts[bs] = (counts[bs] || 0) + 1;
+    });
+    // Build sorted bin list from first to last publication year bin
+    const binStarts = Object.keys(counts).map(Number).sort((a, b) => a - b);
+    if (binStarts.length === 0) return [];
+    // Fill from 1960 to last bin so every 5-year period is represented
+    const allBins = [];
+    const firstBin = 1960;
+    for (let s = firstBin; s <= binStarts[binStarts.length - 1]; s += binSize) {
+      allBins.push({ start: s, count: counts[s] || 0 });
+    }
+    // Weight: each bin gets width proportional to max(1, count)
+    const minWeight = 1;
+    const totalWeight = allBins.reduce((s, b) => s + Math.max(minWeight, b.count), 0);
+    const padLeft = 0; // 1960 empty bin provides left breathing room
+    const padRight = 40; // breathing room right of last bin for labels
+    const usable = pw - padLeft - padRight;
+    let cum = 0;
+    allBins.forEach(bin => {
+      const w = Math.max(minWeight, bin.count);
+      bin.x0 = m.left + padLeft + (cum / totalWeight) * usable;
+      cum += w;
+      bin.x1 = m.left + padLeft + (cum / totalWeight) * usable;
+    });
+    return allBins;
+  }, [books, m.left, pw]);
+
+  const xScale = useCallback(yr => {
+    if (xBins.length === 0) return m.left;
+    const bs = Math.floor(yr / binSize) * binSize;
+    const bin = xBins.find(b => b.start === bs);
+    if (!bin) {
+      // Extrapolate: before first or after last
+      if (yr < xBins[0].start) return xBins[0].x0;
+      return xBins[xBins.length - 1].x1;
+    }
+    // Position within bin: pad 10% on each side, spread by year offset
+    const pad = (bin.x1 - bin.x0) * 0.1;
+    const inner = (bin.x1 - bin.x0) - pad * 2;
+    const t = binSize <= 1 ? 0.5 : (yr - bin.start) / (binSize - 1);
+    return bin.x0 + pad + t * inner;
+  }, [xBins, m.left]);
 
   const positions = useMemo(() => {
     const pos = {};
@@ -191,8 +322,8 @@ function HoSMap() {
   const curFilter = activeCur || hovCur;
   const bookVisible = useCallback(b => !curFilter || b.cur.includes(curFilter), [curFilter]);
 
-  const xTicks = [1965, 1970, 1975, 1980, 1985, 1990, 1995, 2000, 2005, 2010, 2015, 2020, 2025];
-  const yTicks = [1200, 1400, 1500, 1600, 1700, 1800, 1850, 1900, 1950, 2000];
+  const xTicks = xBins.map(b => ({ year: b.start, x: (b.x0 + b.x1) / 2 }));
+  const yTicks = yBins.map(b => b.start);
 
   const activeGeos = useMemo(() => {
     const s = new Set();
@@ -208,7 +339,7 @@ function HoSMap() {
   </div>;
 
   return (
-    <div style={{ fontFamily: "'Libre Baskerville', Georgia, serif", background: "#faf8f4", color: "#2c2417", minHeight: "100vh" }}>
+    <div style={{ fontFamily: "'Libre Baskerville', Georgia, serif", background: "#faf8f4", color: "#2c2417", minHeight: "100vh", display: "flex", flexDirection: "column" }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&family=DM+Sans:wght@300;400;500;600&display=swap');
         .nd { cursor: pointer; transition: all 0.2s; }
@@ -229,15 +360,12 @@ function HoSMap() {
       `}</style>
 
       {/* ── Header ── */}
-      <div style={{ padding: "14px 20px 10px", borderBottom: "1px solid #d4c9b8" }}>
-        <h1 style={{ margin: 0, fontSize: 19, fontWeight: 700 }}>History of Science — Field Map</h1>
-        <p style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 12, color: "#8b7a65", margin: "2px 0 0", fontWeight: 300 }}>
-          X = year published · Y = historical period covered · Dot color = geography · Filter by intellectual current
-        </p>
+      <div style={{ padding: "14px 20px 6px", borderBottom: "1px solid #d4c9b8", flexShrink: 0 }}>
+        <h1 style={{ margin: 0, fontSize: 19, fontWeight: 700 }}>History of Modern Science Generals Books</h1>
 
         <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
-          <label className="ctrl"><input type="checkbox" checked={showConns} onChange={() => setShowConns(!showConns)} /> Connections</label>
-          <label className="ctrl"><input type="checkbox" checked={showWaves} onChange={() => setShowWaves(!showWaves)} /> Waves</label>
+          {/* <label className="ctrl"><input type="checkbox" checked={showConns} onChange={() => setShowConns(!showConns)} /> Connections</label> */}
+          {/* <label className="ctrl"><input type="checkbox" checked={showWaves} onChange={() => setShowWaves(!showWaves)} /> Waves</label> */}
           {activeCur && <button onClick={() => setActiveCur(null)} style={{
             fontFamily: "'DM Sans', sans-serif", fontSize: 10, padding: "2px 8px", background: "#5c4a32",
             color: "#faf8f4", border: "none", borderRadius: 2, cursor: "pointer" }}>Clear ×</button>}
@@ -268,34 +396,38 @@ function HoSMap() {
       </div>
 
       {/* ── SVG ── */}
-      <div ref={containerRef} style={{ width: "100%", height: "calc(100vh - 280px)", minHeight: 480 }}>
+      <div ref={containerRef} style={{ width: "100%", flex: 1, minHeight: 480, overflow: "hidden" }}>
         <svg width={dims.w} height={dims.h} style={{ display: "block" }}>
 
-          {/* Grid */}
-          {xTicks.map(t => <g key={`x${t}`}>
-            <line x1={xScale(t)} x2={xScale(t)} y1={m.top - 5} y2={dims.h - m.bottom} stroke="#ede6da" strokeWidth={0.5}/>
-            <text x={xScale(t)} y={dims.h - m.bottom + 16} textAnchor="middle"
-              style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10, fill: "#b0a090" }}>{t}</text>
+          {/* Grid — vertical lines at bin boundaries + labels at bin centers */}
+          {xBins.map((bin, i) => <g key={`xb${bin.start}`}>
+            <line x1={bin.x0} x2={bin.x0} y1={m.top - 5} y2={dims.h - m.bottom} stroke="#ede6da" strokeWidth={0.5}/>
+            {i === xBins.length - 1 && <line x1={bin.x1} x2={bin.x1} y1={m.top - 5} y2={dims.h - m.bottom} stroke="#ede6da" strokeWidth={0.5}/>}
+            <text x={(bin.x0 + bin.x1) / 2} y={dims.h - m.bottom + 16} textAnchor="middle"
+              style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10, fill: "#b0a090" }}>
+              {"'" + String(bin.start).slice(2)}
+            </text>
           </g>)}
-          {yTicks.map(t => <g key={`y${t}`}>
-            <line x1={m.left} x2={dims.w - m.right} y1={yScale(t)} y2={yScale(t)} stroke="#ede6da" strokeWidth={0.5}/>
-            <text x={m.left - 8} y={yScale(t) + 3.5} textAnchor="end"
-              style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10, fill: "#b0a090" }}>{t}</text>
+          {yBins.map((bin, i) => <g key={`yb${bin.start}`}>
+            <line x1={m.left} x2={dims.w - m.right} y1={bin.py1} y2={bin.py1} stroke="#ede6da" strokeWidth={0.5}/>
+            {i === yBins.length - 1 && <line x1={m.left} x2={dims.w - m.right} y1={bin.py0} y2={bin.py0} stroke="#ede6da" strokeWidth={0.5}/>}
+            <text x={m.left - 4} y={(bin.py0 + bin.py1) / 2 + 3.5} textAnchor="end"
+              style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10, fill: "#b0a090" }}>{bin.start}</text>
           </g>)}
 
           {/* Axis labels */}
           <text x={m.left + pw / 2} y={dims.h - 6} textAnchor="middle"
             style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10.5, fill: "#8b7a65", fontWeight: 500, letterSpacing: "1px" }}>
-            YEAR PUBLISHED →</text>
-          <text x={13} y={m.top + ph / 2} textAnchor="middle" transform={`rotate(-90, 13, ${m.top + ph / 2})`}
+            YEAR PUBLISHED</text>
+          <text x={14} y={m.top + ph / 2} textAnchor="middle" transform={`rotate(-90, 14, ${m.top + ph / 2})`}
             style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10.5, fill: "#8b7a65", fontWeight: 500, letterSpacing: "1px" }}>
-            ← RECENT &nbsp;&nbsp; HISTORICAL PERIOD &nbsp;&nbsp; EARLY →</text>
+            HISTORICAL PERIOD</text>
 
           {/* Waves */}
           {showWaves && WAVES.map((w, i) => <g key={i} opacity={0.06}>
             <rect x={xScale(w.y0)} y={m.top} width={xScale(w.y1) - xScale(w.y0)} height={ph} fill={w.color}/>
-            <text x={xScale(w.y0) + 3} y={m.top + 12} textAnchor="start"
-              style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 9, fill: w.color, fontWeight: 600, opacity: 8 }}>{w.label}</text>
+            {/*<text x={xScale(w.y0) + 3} y={m.top + 12} textAnchor="start"
+              style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 9, fill: w.color, fontWeight: 600, opacity: 8 }}>{w.label}</text>*/}
           </g>)}
 
           {/* Range bars */}
@@ -329,7 +461,7 @@ function HoSMap() {
             const act = (!selected || isSel || isConn) && vis;
             const gc = GEO[b.geo]?.color || "#888";
             const r = isSel ? 7 : isConn ? 5.5 : 4;
-            return <g key={b.id} className="nd" onClick={() => setSelected(isSel ? null : b.id)}>
+            return <g key={b.id} className="nd" onClick={() => { setSelected(isSel ? null : b.id); setPanelPos(null); }}>
               <circle cx={p.x} cy={p.y} r={r + 5} fill="transparent"/>
               {isSel && <circle cx={p.x} cy={p.y} r={r + 3} fill={gc} opacity={0.14}/>}
               <circle cx={p.x} cy={p.y} r={r} fill={gc}
@@ -343,20 +475,39 @@ function HoSMap() {
         </svg>
       </div>
 
-      {/* ── Detail panel ── */}
-      {selBook && <div style={{ padding: "0 16px" }}>
-        <div className="dp">
+      {/* ── Detail panel (positioned near dot) ── */}
+      {selBook && (() => {
+        const p = positions[selBook.id];
+        if (!p) return null;
+        const panelW = 420, panelH = 280;
+        // Position to the right of the dot by default; flip left if near right edge
+        const gap = 18;
+        let left = p.x + gap;
+        if (left + panelW > dims.w - 20) left = p.x - panelW - gap;
+        // Vertically center on the dot, but clamp to stay on screen
+        const headerH = containerRef.current ? containerRef.current.getBoundingClientRect().top : 0;
+        let top = p.y - panelH / 2 + headerH;
+        top = Math.max(headerH + 8, Math.min(top, headerH + dims.h - panelH - 8));
+        // Use dragged position if available
+        const finalLeft = panelPos ? panelPos.x : left;
+        const finalTop = panelPos ? panelPos.y : top;
+        return <div className="dp" onMouseDown={onPanelMouseDown} style={{
+          position: "fixed", left: finalLeft, top: finalTop, width: panelW, zIndex: 10,
+          background: "#fff", border: "1px solid #d4c9b8", padding: "16px 18px",
+          boxShadow: "0 4px 20px rgba(0,0,0,0.1)", maxHeight: panelH, overflowY: "auto",
+          cursor: "grab", userSelect: "none",
+        }}>
           <div style={{ display: "flex", justifyContent: "space-between" }}>
             <div>
-              <h2 style={{ margin: 0, fontSize: 15, lineHeight: 1.3 }}>{selBook.a}, <em>{selBook.t}</em></h2>
+              <h2 style={{ margin: 0, fontSize: 14, lineHeight: 1.3 }}>{selBook.a}, <em>{selBook.t}</em></h2>
               <p style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, color: "#8b7a65", margin: "3px 0" }}>
                 Published {selBook.yr} · Covers {selBook.h0}–{selBook.h1} ·&nbsp;
                 <span style={{ color: GEO[selBook.geo]?.color }}>{GEO[selBook.geo]?.label || selBook.geo}</span>
               </p>
             </div>
-            <button onClick={() => setSelected(null)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 20, color: "#b0a090" }}>×</button>
+            <button onClick={() => setSelected(null)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 20, color: "#b0a090", lineHeight: 1 }}>×</button>
           </div>
-          <p style={{ fontSize: 13, lineHeight: 1.6, margin: "8px 0" }}>{selBook.d}</p>
+          <p style={{ fontSize: 12.5, lineHeight: 1.55, margin: "8px 0" }}>{selBook.d}</p>
           <div>{selBook.cur.map(c => <span key={c} className="tag" style={{ background: CURRENTS[c]?.color || "#888" }}>{CURRENTS[c]?.label || c}</span>)}</div>
           {connIds.size > 0 && <div style={{ borderTop: "1px solid #e8dfd2", marginTop: 10, paddingTop: 8 }}>
             <p style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 9.5, color: "#9a8b78", margin: "0 0 4px", textTransform: "uppercase", letterSpacing: "0.5px", fontWeight: 600 }}>Connections</p>
@@ -370,8 +521,8 @@ function HoSMap() {
               </div>;
             })}
           </div>}
-        </div>
-      </div>}
+        </div>;
+      })()}
     </div>
   );
 }
