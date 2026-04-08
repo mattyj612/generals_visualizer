@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>History of Science — Field Map</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body, #root { height: 100%; }
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useRef, useEffect, useMemo, useCallback } = React;
+
+/* ── Geography colors (dot fill) ── */
+const GEO = {
+  europe:        { label: "Europe",         color: "#4a6fa5" },
+  north_america: { label: "North America",  color: "#b45309" },
+  latin_america: { label: "Latin America",  color: "#d64545" },
+  caribbean:     { label: "Caribbean",      color: "#c2185b" },
+  africa:        { label: "Africa",         color: "#e67e22" },
+  east_asia:     { label: "East Asia",      color: "#00838f" },
+  south_asia:    { label: "South Asia",     color: "#6a1b9a" },
+  russia:        { label: "Russia / USSR",  color: "#c62828" },
+  transatlantic: { label: "Transatlantic",  color: "#3a5a40" },
+  global:        { label: "Global",         color: "#6b7280" },
+};
+
+/* ── Intellectual-current chips (filter layer) ── */
+const CURRENTS = {
+  epistemology:  { label: "Epistemology",              color: "#b45309" },
+  construction:  { label: "Social Construction & SSK", color: "#dc2626" },
+  material:      { label: "Tools & Material Culture",  color: "#2563eb" },
+  statepower:    { label: "Science, States & Power",   color: "#4338ca" },
+  bodies:        { label: "Bodies, Gender & Exclusion", color: "#a21caf" },
+  circulation:   { label: "Circulation & Publics",     color: "#0d9488" },
+  empire:        { label: "Empire & the Global",       color: "#ea580c" },
+  nature:        { label: "Nature & Place",            color: "#15803d" },
+};
+
+const WAVES = [
+  { label: "SSK & Lab Studies",              y0: 1984, y1: 1987, color: "#dc2626" },
+  { label: "Material / Instrument Turn",     y0: 1994, y1: 1999, color: "#2563eb" },
+  { label: "Empire, Extraction & Global Turn", y0: 2017, y1: 2026, color: "#ea580c" },
+];
+
+/* ── Label collision solver ── */
+function solveLabels(nodes, dims) {
+  // Each label: { id, x, y, w, h }  — y = center
+  const labels = nodes.map(n => ({
+    id: n.id, ox: n.x, oy: n.y,
+    x: n.x + 8, y: n.y,
+    w: n.a.length * 6.2 + 8, h: 13,
+    anchor: "start",
+  }));
+  // Iterative push
+  for (let iter = 0; iter < 60; iter++) {
+    let moved = false;
+    for (let i = 0; i < labels.length; i++) {
+      for (let j = i + 1; j < labels.length; j++) {
+        const a = labels[i], b = labels[j];
+        const ox = Math.abs(a.x + a.w/2 - b.x - b.w/2);
+        const oy = Math.abs(a.y - b.y);
+        const minX = (a.w + b.w) / 2 + 2;
+        const minY = (a.h + b.h) / 2 + 1;
+        if (ox < minX && oy < minY) {
+          const dy = (minY - oy) / 2 + 0.5;
+          if (a.y < b.y) { a.y -= dy; b.y += dy; }
+          else { a.y += dy; b.y -= dy; }
+          moved = true;
+        }
+      }
+    }
+    if (!moved) break;
+  }
+  // Flip labels to left if they'd go off-screen
+  labels.forEach(l => {
+    if (l.x + l.w > dims.w - 10) {
+      l.x = l.ox - l.w - 6;
+      l.anchor = "end";
+    }
+    // clamp vertical
+    l.y = Math.max(16, Math.min(dims.h - 10, l.y));
+  });
+  const map = {};
+  labels.forEach(l => map[l.id] = l);
+  return map;
+}
+
+/* ── Main component ── */
+function HoSMap() {
+  const [books, setBooks] = useState([]);
+  const [connections, setConnections] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [selected, setSelected] = useState(null);
+  const [hovCur, setHovCur] = useState(null);
+  const [activeCur, setActiveCur] = useState(null);
+  const [showConns, setShowConns] = useState(true);
+  const [showWaves, setShowWaves] = useState(true);
+  const containerRef = useRef(null);
+  const [dims, setDims] = useState({ w: 1100, h: 750 });
+
+  /* ── Load CSVs ── */
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const [bRes, cRes] = await Promise.all([
+          fetch("data/books.csv").then(r => { if (!r.ok) throw new Error("books.csv not found"); return r.text(); }),
+          fetch("data/connections.csv").then(r => { if (!r.ok) throw new Error("connections.csv not found"); return r.text(); }),
+        ]);
+        if (cancelled) return;
+        const bParsed = Papa.parse(bRes, { header: true, skipEmptyLines: true });
+        const cParsed = Papa.parse(cRes, { header: true, skipEmptyLines: true });
+        const bks = bParsed.data.map(r => ({
+          id: parseInt(r.id),
+          a: r.author,
+          t: r.title,
+          yr: parseInt(r.year_published),
+          h0: parseInt(r.hist_start),
+          h1: parseInt(r.hist_end),
+          geo: (r.geography || "global").trim(),
+          cur: (r.currents || "").split("|").map(s => s.trim()).filter(Boolean),
+          d: r.description || "",
+        }));
+        const cns = cParsed.data.map(r => [parseInt(r.source_id), parseInt(r.target_id), r.label || ""]);
+        setBooks(bks);
+        setConnections(cns);
+        setLoading(false);
+      } catch (e) {
+        if (!cancelled) setError(e.message);
+        setLoading(false);
+      }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    const obs = new ResizeObserver(entries => {
+      for (const e of entries) setDims({ w: e.contentRect.width, h: Math.max(650, e.contentRect.height) });
+    });
+    if (containerRef.current) obs.observe(containerRef.current);
+    return () => obs.disconnect();
+  }, []);
+
+  const m = { top: 70, right: 50, bottom: 55, left: 75 };
+  const pw = dims.w - m.left - m.right;
+  const ph = dims.h - m.top - m.bottom;
+  const xMin = 1960, xMax = 2028, yMin = 1100, yMax = 2030;
+
+  const xScale = useCallback(v => m.left + ((v - xMin) / (xMax - xMin)) * pw, [pw, m.left]);
+  const yScale = useCallback(v => m.top + ph - ((v - yMin) / (yMax - yMin)) * ph, [ph, m.top]);
+
+  const positions = useMemo(() => {
+    const pos = {};
+    const grid = {};
+    books.forEach(b => {
+      let x = xScale(b.yr);
+      let y = yScale((b.h0 + b.h1) / 2);
+      const gk = `${Math.round(x / 28)}-${Math.round(y / 22)}`;
+      if (!grid[gk]) grid[gk] = 0;
+      const n = grid[gk]; grid[gk]++;
+      x += (n % 3 - 1) * 16;
+      y += Math.floor(n / 3) * 18;
+      pos[b.id] = { x, y };
+    });
+    return pos;
+  }, [books, xScale, yScale]);
+
+  const labelPositions = useMemo(() => {
+    const nodes = books.map(b => ({ id: b.id, a: b.a, x: positions[b.id]?.x || 0, y: positions[b.id]?.y || 0 }));
+    return solveLabels(nodes, dims);
+  }, [books, positions, dims]);
+
+  const selBook = selected ? books.find(b => b.id === selected) : null;
+  const connIds = useMemo(() => {
+    if (!selected) return new Set();
+    const s = new Set();
+    connections.forEach(([a, b]) => { if (a === selected) s.add(b); if (b === selected) s.add(a); });
+    return s;
+  }, [selected, connections]);
+
+  const curFilter = activeCur || hovCur;
+  const bookVisible = useCallback(b => !curFilter || b.cur.includes(curFilter), [curFilter]);
+
+  const xTicks = [1965, 1970, 1975, 1980, 1985, 1990, 1995, 2000, 2005, 2010, 2015, 2020, 2025];
+  const yTicks = [1200, 1400, 1500, 1600, 1700, 1800, 1850, 1900, 1950, 2000];
+
+  const activeGeos = useMemo(() => {
+    const s = new Set();
+    books.forEach(b => s.add(b.geo));
+    return [...s].sort();
+  }, [books]);
+
+  if (loading) return <div style={{ padding: 40, fontFamily: "sans-serif", color: "#888" }}>Loading CSV data…</div>;
+  if (error) return <div style={{ padding: 40, fontFamily: "sans-serif", color: "#c00" }}>
+    <strong>Error loading data:</strong> {error}<br/><br/>
+    Make sure <code>data/books.csv</code> and <code>data/connections.csv</code> are in the same directory as this HTML file.
+    If running locally, use a local server (<code>python -m http.server</code>) — browsers block fetch() on file:// URLs.
+  </div>;
+
+  return (
+    <div style={{ fontFamily: "'Libre Baskerville', Georgia, serif", background: "#faf8f4", color: "#2c2417", minHeight: "100vh" }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&family=DM+Sans:wght@300;400;500;600&display=swap');
+        .nd { cursor: pointer; transition: all 0.2s; }
+        .nd:hover { filter: brightness(1.15); }
+        .cl { pointer-events: none; }
+        .chip { cursor: pointer; padding: 4px 10px; font-family: 'DM Sans', sans-serif;
+          font-size: 11px; font-weight: 500; border-radius: 2px; transition: all 0.2s;
+          user-select: none; white-space: nowrap; display: inline-block; }
+        .ctrl { font-family: 'DM Sans', sans-serif; font-size: 11px; color: #9a8b78;
+          cursor: pointer; display: inline-flex; align-items: center; gap: 4px; user-select: none; }
+        .dp { background: #fff; border: 1px solid #d4c9b8; padding: 20px 24px;
+          box-shadow: 0 4px 20px rgba(0,0,0,0.06); max-width: 580px; margin: 0 auto 16px; }
+        .ci { font-family: 'DM Sans', sans-serif; font-size: 12px; padding: 3px 0;
+          cursor: pointer; }
+        .ci:hover span:first-child { text-decoration: underline; }
+        .tag { display: inline-block; padding: 2px 7px; border-radius: 2px; font-size: 9.5px;
+          font-family: 'DM Sans', sans-serif; margin: 2px; color: #fff; }
+      `}</style>
+
+      {/* ── Header ── */}
+      <div style={{ padding: "14px 20px 10px", borderBottom: "1px solid #d4c9b8" }}>
+        <h1 style={{ margin: 0, fontSize: 19, fontWeight: 700 }}>History of Science — Field Map</h1>
+        <p style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 12, color: "#8b7a65", margin: "2px 0 0", fontWeight: 300 }}>
+          X = year published · Y = historical period covered · Dot color = geography · Filter by intellectual current
+        </p>
+
+        <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
+          <label className="ctrl"><input type="checkbox" checked={showConns} onChange={() => setShowConns(!showConns)} /> Connections</label>
+          <label className="ctrl"><input type="checkbox" checked={showWaves} onChange={() => setShowWaves(!showWaves)} /> Waves</label>
+          {activeCur && <button onClick={() => setActiveCur(null)} style={{
+            fontFamily: "'DM Sans', sans-serif", fontSize: 10, padding: "2px 8px", background: "#5c4a32",
+            color: "#faf8f4", border: "none", borderRadius: 2, cursor: "pointer" }}>Clear ×</button>}
+        </div>
+
+        {/* Current chips */}
+        <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 6 }}>
+          {Object.entries(CURRENTS).map(([k, { label, color }]) => {
+            const on = activeCur === k, hov = hovCur === k;
+            return <span key={k} className="chip"
+              onClick={() => setActiveCur(on ? null : k)}
+              onMouseEnter={() => setHovCur(k)} onMouseLeave={() => setHovCur(null)}
+              style={{ background: on || hov ? color : "transparent", color: on || hov ? "#fff" : color,
+                border: `1.5px solid ${color}`, opacity: curFilter && !on && !hov ? 0.35 : 1 }}>{label}</span>;
+          })}
+        </div>
+
+        {/* Geography legend */}
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 6, alignItems: "center" }}>
+          <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 9.5, color: "#a09080", textTransform: "uppercase", letterSpacing: "0.5px" }}>Geography:</span>
+          {activeGeos.map(g => GEO[g] && (
+            <span key={g} style={{ display: "inline-flex", alignItems: "center", gap: 4, fontFamily: "'DM Sans', sans-serif", fontSize: 10.5, color: "#6b5d4f" }}>
+              <span style={{ width: 8, height: 8, borderRadius: "50%", background: GEO[g].color, display: "inline-block" }}/>
+              {GEO[g].label}
+            </span>
+          ))}
+        </div>
+      </div>
+
+      {/* ── SVG ── */}
+      <div ref={containerRef} style={{ width: "100%", height: "calc(100vh - 280px)", minHeight: 480 }}>
+        <svg width={dims.w} height={dims.h} style={{ display: "block" }}>
+
+          {/* Grid */}
+          {xTicks.map(t => <g key={`x${t}`}>
+            <line x1={xScale(t)} x2={xScale(t)} y1={m.top - 5} y2={dims.h - m.bottom} stroke="#ede6da" strokeWidth={0.5}/>
+            <text x={xScale(t)} y={dims.h - m.bottom + 16} textAnchor="middle"
+              style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10, fill: "#b0a090" }}>{t}</text>
+          </g>)}
+          {yTicks.map(t => <g key={`y${t}`}>
+            <line x1={m.left} x2={dims.w - m.right} y1={yScale(t)} y2={yScale(t)} stroke="#ede6da" strokeWidth={0.5}/>
+            <text x={m.left - 8} y={yScale(t) + 3.5} textAnchor="end"
+              style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10, fill: "#b0a090" }}>{t}</text>
+          </g>)}
+
+          {/* Axis labels */}
+          <text x={m.left + pw / 2} y={dims.h - 6} textAnchor="middle"
+            style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10.5, fill: "#8b7a65", fontWeight: 500, letterSpacing: "1px" }}>
+            YEAR PUBLISHED →</text>
+          <text x={13} y={m.top + ph / 2} textAnchor="middle" transform={`rotate(-90, 13, ${m.top + ph / 2})`}
+            style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10.5, fill: "#8b7a65", fontWeight: 500, letterSpacing: "1px" }}>
+            ← RECENT &nbsp;&nbsp; HISTORICAL PERIOD &nbsp;&nbsp; EARLY →</text>
+
+          {/* Waves */}
+          {showWaves && WAVES.map((w, i) => <g key={i} opacity={0.06}>
+            <rect x={xScale(w.y0)} y={m.top} width={xScale(w.y1) - xScale(w.y0)} height={ph} fill={w.color}/>
+            <text x={xScale(w.y0) + 3} y={m.top + 12} textAnchor="start"
+              style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 9, fill: w.color, fontWeight: 600, opacity: 8 }}>{w.label}</text>
+          </g>)}
+
+          {/* Range bars */}
+          {books.map(b => {
+            const p = positions[b.id]; if (!p) return null;
+            const vis = bookVisible(b);
+            const act = !selected || selected === b.id || connIds.has(b.id);
+            return <line key={`r${b.id}`} x1={p.x} x2={p.x} y1={yScale(b.h0)} y2={yScale(b.h1)}
+              stroke={GEO[b.geo]?.color || "#999"} strokeWidth={1.5} opacity={vis && act ? 0.2 : 0.03}/>;
+          })}
+
+          {/* Connections */}
+          {showConns && connections.map(([aId, bId, label], i) => {
+            const pA = positions[aId], pB = positions[bId];
+            if (!pA || !pB) return null;
+            const sa = selected ? (aId === selected || bId === selected) : false;
+            const bA = books.find(b => b.id === aId), bB = books.find(b => b.id === bId);
+            const ca = curFilter && bA && bB ? (bA.cur.includes(curFilter) && bB.cur.includes(curFilter)) : false;
+            const op = selected ? (sa ? 0.4 : 0.01) : (curFilter ? (ca ? 0.3 : 0.01) : 0.035);
+            return <line key={i} className="cl" x1={pA.x} y1={pA.y} x2={pB.x} y2={pB.y}
+              stroke={sa ? "#3c3226" : "#b0a090"} strokeWidth={sa ? 1.5 : 0.6} opacity={op}/>;
+          })}
+
+          {/* Nodes + labels */}
+          {books.map(b => {
+            const p = positions[b.id]; if (!p) return null;
+            const lp = labelPositions[b.id];
+            const isSel = selected === b.id;
+            const isConn = connIds.has(b.id);
+            const vis = bookVisible(b);
+            const act = (!selected || isSel || isConn) && vis;
+            const gc = GEO[b.geo]?.color || "#888";
+            const r = isSel ? 7 : isConn ? 5.5 : 4;
+            return <g key={b.id} className="nd" onClick={() => setSelected(isSel ? null : b.id)}>
+              <circle cx={p.x} cy={p.y} r={r + 5} fill="transparent"/>
+              {isSel && <circle cx={p.x} cy={p.y} r={r + 3} fill={gc} opacity={0.14}/>}
+              <circle cx={p.x} cy={p.y} r={r} fill={gc}
+                stroke={isSel ? "#2c2417" : "none"} strokeWidth={2} opacity={act ? 1 : 0.1}/>
+              {lp && <text x={lp.x} y={lp.y + 3.5} textAnchor={lp.anchor === "end" ? "end" : "start"}
+                style={{ fontFamily: "'DM Sans', sans-serif", fontSize: isSel ? 11 : 9.5,
+                  fontWeight: isSel ? 600 : 400, fill: act ? "#2c2417" : "#d4c9b8",
+                  pointerEvents: "none" }}>{b.a}</text>}
+            </g>;
+          })}
+        </svg>
+      </div>
+
+      {/* ── Detail panel ── */}
+      {selBook && <div style={{ padding: "0 16px" }}>
+        <div className="dp">
+          <div style={{ display: "flex", justifyContent: "space-between" }}>
+            <div>
+              <h2 style={{ margin: 0, fontSize: 15, lineHeight: 1.3 }}>{selBook.a}, <em>{selBook.t}</em></h2>
+              <p style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, color: "#8b7a65", margin: "3px 0" }}>
+                Published {selBook.yr} · Covers {selBook.h0}–{selBook.h1} ·&nbsp;
+                <span style={{ color: GEO[selBook.geo]?.color }}>{GEO[selBook.geo]?.label || selBook.geo}</span>
+              </p>
+            </div>
+            <button onClick={() => setSelected(null)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 20, color: "#b0a090" }}>×</button>
+          </div>
+          <p style={{ fontSize: 13, lineHeight: 1.6, margin: "8px 0" }}>{selBook.d}</p>
+          <div>{selBook.cur.map(c => <span key={c} className="tag" style={{ background: CURRENTS[c]?.color || "#888" }}>{CURRENTS[c]?.label || c}</span>)}</div>
+          {connIds.size > 0 && <div style={{ borderTop: "1px solid #e8dfd2", marginTop: 10, paddingTop: 8 }}>
+            <p style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 9.5, color: "#9a8b78", margin: "0 0 4px", textTransform: "uppercase", letterSpacing: "0.5px", fontWeight: 600 }}>Connections</p>
+            {connections.filter(([a, b]) => a === selected || b === selected).map(([a, b, label], i) => {
+              const oId = a === selected ? b : a;
+              const o = books.find(bk => bk.id === oId);
+              if (!o) return null;
+              return <div key={i} className="ci" onClick={() => setSelected(oId)} style={{ color: "#6b5d4f" }}>
+                <span style={{ color: GEO[o.geo]?.color, fontWeight: 600 }}>{o.a}</span>
+                <span style={{ color: "#b0a090" }}> — {label}</span>
+              </div>;
+            })}
+          </div>}
+        </div>
+      </div>}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<HoSMap />);
+</script>
+</body>
+</html>
