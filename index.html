@@ -14,6 +14,7 @@
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body, #root { height: 100%; width: 100%; overflow-x: hidden; }
+  html { -webkit-text-size-adjust: 100%; }
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
@@ -25,118 +26,207 @@
 <script type="text/babel">
 const { useState, useRef, useEffect, useMemo, useCallback } = React;
 
-/* ── Geography colors (dot fill) ── */
+/* ── Geography colors (dot fill) — shared across fields ── */
 const GEO = {
-  europe:        { label: "Europe",         color: "#4a6fa5" },
-  north_america: { label: "North America",  color: "#b45309" },
-  latin_america: { label: "Latin America",  color: "#d64545" },
-  caribbean:     { label: "Caribbean",      color: "#c2185b" },
-  africa:        { label: "Africa",         color: "#e67e22" },
-  east_asia:     { label: "East Asia",      color: "#00838f" },
-  south_asia:    { label: "South Asia",     color: "#6a1b9a" },
-  russia:        { label: "Russia / USSR",  color: "#c62828" },
-  transatlantic: { label: "Transatlantic",  color: "#3a5a40" },
-  global:        { label: "Global",         color: "#6b7280" },
+  europe:        { label: "Europe",         color: "#2563eb" },
+  north_america: { label: "North America",  color: "#e85d04" },
+  latin_america: { label: "Latin America",  color: "#d91656" },
+  caribbean:     { label: "Caribbean",      color: "#9d174d" },
+  africa:        { label: "Africa",         color: "#f59e0b" },
+  east_asia:     { label: "East Asia",      color: "#0891b2" },
+  south_asia:    { label: "South Asia",     color: "#7c3aed" },
+  russia:        { label: "Russia / USSR",  color: "#dc2626" },
+  transatlantic: { label: "Transatlantic",  color: "#16a34a" },
+  canada:        { label: "Canada",         color: "#059669" },
+  global:        { label: "Global",         color: "#64748b" },
+  general:       { label: "General / US",   color: "#e85d04" },
+  new_york:      { label: "New York",       color: "#2563eb" },
+  boston:         { label: "Boston",         color: "#0891b2" },
+  chicago:       { label: "Chicago",        color: "#dc2626" },
+  los_angeles:   { label: "Los Angeles",    color: "#d91656" },
+  detroit:       { label: "Detroit",        color: "#7c3aed" },
+  phoenix:       { label: "Phoenix",        color: "#f59e0b" },
+  palo_alto:     { label: "Palo Alto",      color: "#16a34a" },
+  toronto:       { label: "Toronto",        color: "#059669" },
+  multiple:      { label: "Multiple Cities", color: "#64748b" },
+  general_canada:{ label: "Canada (General)", color: "#059669" },
 };
 
-/* ── Intellectual-current chips (filter layer) ── */
-const CURRENTS = {
-  epistemology:  { label: "Epistemology",              color: "#b45309" },
-  construction:  { label: "Social Construction & SSK", color: "#dc2626" },
-  material:      { label: "Tools & Material Culture",  color: "#2563eb" },
-  statepower:    { label: "Science, States & Power",   color: "#4338ca" },
-  bodies:        { label: "Bodies, Gender & Exclusion", color: "#a21caf" },
-  circulation:   { label: "Circulation & Publics",     color: "#0d9488" },
-  empire:        { label: "Empire & the Global",       color: "#ea580c" },
-  nature:        { label: "Nature & Place",            color: "#15803d" },
+/* ── Per-field configuration ── */
+const FIELDS = {
+  hos: {
+    label: "History of Science",
+    title: "History of Modern Science Generals Books",
+    booksFile: "data/hos_books.csv",
+    connsFile: "data/hos_connections.csv",
+    currents: {
+      epistemology:  { label: "Epistemology",              color: "#b45309" },
+      construction:  { label: "Social Construction & SSK", color: "#dc2626" },
+      material:      { label: "Tools & Material Culture",  color: "#2563eb" },
+      statepower:    { label: "Science, States & Power",   color: "#4338ca" },
+      bodies:        { label: "Bodies, Gender & Exclusion", color: "#a21caf" },
+      circulation:   { label: "Circulation & Publics",     color: "#0d9488" },
+      empire:        { label: "Empire & the Global",       color: "#ea580c" },
+      nature:        { label: "Nature & Place",            color: "#15803d" },
+    },
+    waves: [
+      { label: "SSK & Lab Studies",              y0: 1984, y1: 1987, color: "#dc2626" },
+      { label: "Material / Instrument Turn",     y0: 1994, y1: 1999, color: "#2563eb" },
+      { label: "Empire, Extraction & Global Turn", y0: 2017, y1: 2026, color: "#ea580c" },
+    ],
+  },
+  hot: {
+    label: "History of Technology",
+    title: "History of Technology Generals Books",
+    booksFile: "data/hot_books.csv",
+    connsFile: "data/hot_connections.csv",
+    currents: {
+      determinism:    { label: "Determinism & Agency",    color: "#dc2626" },
+      systems:        { label: "Systems & Infrastructure", color: "#4338ca" },
+      capitalism:     { label: "Capitalism & Labor",      color: "#b45309" },
+      innovation:     { label: "Innovation & Users",      color: "#0d9488" },
+      computing:      { label: "Computing & AI",          color: "#2563eb" },
+      communication:  { label: "Communication & Media",   color: "#ea580c" },
+      environment:    { label: "Environment & Nature",    color: "#15803d" },
+      gender:         { label: "Gender & Exclusion",      color: "#a21caf" },
+      coldwar:        { label: "Cold War & Military",     color: "#64748b" },
+      quantification: { label: "Quantification & Data",   color: "#7c3aed" },
+    },
+    waves: [],
+  },
+  urban: {
+    label: "Urban History",
+    title: "Urban History Generals Books",
+    booksFile: "data/urban_books.csv",
+    connsFile: "data/urban_connections.csv",
+    currents: {
+      foundations:       { label: "Foundations",              color: "#b45309" },
+      political_economy: { label: "Political Economy",       color: "#dc2626" },
+      suburbs:           { label: "Suburbs & Sprawl",        color: "#2563eb" },
+      race:              { label: "Race & Segregation",       color: "#4338ca" },
+      community:         { label: "Community & Culture",      color: "#0d9488" },
+      built_environment: { label: "Built Environment",        color: "#ea580c" },
+      environment:       { label: "Environment & Nature",     color: "#15803d" },
+    },
+    waves: [],
+  },
 };
-
-const WAVES = [
-  { label: "SSK & Lab Studies",              y0: 1984, y1: 1987, color: "#dc2626" },
-  { label: "Material / Instrument Turn",     y0: 1994, y1: 1999, color: "#2563eb" },
-  { label: "Empire, Extraction & Global Turn", y0: 2017, y1: 2026, color: "#ea580c" },
-];
 
 /* ── Label collision solver ── */
 function solveLabels(nodes, dims) {
-  // Each label: { id, x, y, w, h }  — y = center
+  const fontSize = 8;
+  const charW = fontSize * 0.62;
   const labels = nodes.map(n => ({
     id: n.id, ox: n.x, oy: n.y,
-    x: n.x + 8, y: n.y,
-    w: n.a.length * 6.2 + 8, h: 13,
+    x: n.x + 7, y: n.y,
+    w: n.a.length * charW + 6, h: fontSize + 3,
     anchor: "start",
   }));
-  // Iterative push + spring back toward origin
-  for (let iter = 0; iter < 60; iter++) {
+
+  // Flip labels to left if they'd go off right edge
+  labels.forEach(l => {
+    if (l.x + l.w > dims.w - 10) {
+      l.x = l.ox - l.w - 5;
+      l.anchor = "end";
+    }
+  });
+
+  // Iterative solver: push apart overlapping labels in both X and Y, with spring
+  for (let iter = 0; iter < 120; iter++) {
     let moved = false;
     for (let i = 0; i < labels.length; i++) {
       for (let j = i + 1; j < labels.length; j++) {
         const a = labels[i], b = labels[j];
-        const ox = Math.abs(a.x + a.w/2 - b.x - b.w/2);
-        const oy = Math.abs(a.y - b.y);
+        const aCx = a.x + a.w / 2, bCx = b.x + b.w / 2;
+        const dx = Math.abs(aCx - bCx), dy = Math.abs(a.y - b.y);
         const minX = (a.w + b.w) / 2 + 2;
         const minY = (a.h + b.h) / 2 + 1;
-        if (ox < minX && oy < minY) {
-          const dy = (minY - oy) / 2 + 0.5;
-          if (a.y < b.y) { a.y -= dy; b.y += dy; }
-          else { a.y += dy; b.y -= dy; }
+        if (dx < minX && dy < minY) {
+          // Push in the direction of least overlap
+          const overlapX = minX - dx, overlapY = minY - dy;
+          if (overlapY <= overlapX) {
+            const py = overlapY / 2 + 0.3;
+            if (a.y < b.y) { a.y -= py; b.y += py; }
+            else { a.y += py; b.y -= py; }
+          } else {
+            const px = overlapX / 2 + 0.3;
+            if (aCx < bCx) { a.x -= px; b.x += px; }
+            else { a.x += px; b.x -= px; }
+          }
           moved = true;
         }
       }
     }
-    // Spring: pull each label back toward its dot origin
+    // Spring: pull back toward origin
     for (let i = 0; i < labels.length; i++) {
       const l = labels[i];
-      const drift = l.y - l.oy;
-      if (Math.abs(drift) > 1) {
-        l.y -= drift * 0.15;
-      }
+      const driftY = l.y - l.oy;
+      const driftX = l.x - (l.anchor === "end" ? l.ox - l.w - 5 : l.ox + 7);
+      if (Math.abs(driftY) > 0.5) l.y -= driftY * 0.08;
+      if (Math.abs(driftX) > 0.5) l.x -= driftX * 0.08;
     }
     if (!moved) break;
   }
-  // Hard clamp: never let a label drift more than 40px from its dot
+
+  // Clamp: keep labels on screen and limit max drift
   labels.forEach(l => {
-    const maxDrift = 40;
-    l.y = Math.max(l.oy - maxDrift, Math.min(l.oy + maxDrift, l.y));
+    const maxDriftY = 70, maxDriftX = 60;
+    l.y = Math.max(l.oy - maxDriftY, Math.min(l.oy + maxDriftY, l.y));
+    const homeX = l.anchor === "end" ? l.ox - l.w - 5 : l.ox + 7;
+    l.x = Math.max(homeX - maxDriftX, Math.min(homeX + maxDriftX, l.x));
+    l.y = Math.max(10, Math.min(dims.h - 6, l.y));
+    l.x = Math.max(4, Math.min(dims.w - l.w - 4, l.x));
+    // Compute drift distance for leader line
+    l.drift = Math.sqrt((l.x + (l.anchor === "end" ? l.w : 0) - l.ox) ** 2 + (l.y - l.oy) ** 2);
   });
-  // Flip labels to left if they'd go off-screen
-  labels.forEach(l => {
-    if (l.x + l.w > dims.w - 10) {
-      l.x = l.ox - l.w - 6;
-      l.anchor = "end";
-    }
-    // clamp vertical
-    l.y = Math.max(16, Math.min(dims.h - 10, l.y));
-  });
+
   const map = {};
   labels.forEach(l => map[l.id] = l);
   return map;
 }
 
 /* ── Main component ── */
-function HoSMap() {
+function App() {
+  const [field, setField] = useState("hos");
   const [books, setBooks] = useState([]);
   const [connections, setConnections] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [selected, setSelected] = useState(null);
+  const [hovered, setHovered] = useState(null);
   const [hovCur, setHovCur] = useState(null);
   const [activeCur, setActiveCur] = useState(null);
   const [showConns, setShowConns] = useState(true);
   const [showWaves, setShowWaves] = useState(true);
   const containerRef = useRef(null);
   const [dims, setDims] = useState({ w: window.innerWidth, h: 750 });
-  const [panelPos, setPanelPos] = useState(null); // {x, y} when user drags
-  const dragRef = useRef(null); // {startX, startY, origX, origY} during drag
+  const [panelPos, setPanelPos] = useState(null);
+  const dragRef = useRef(null);
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
 
-  /* ── Load CSVs ── */
+  const cfg = FIELDS[field];
+  const CURRENTS = cfg.currents;
+  const WAVES = cfg.waves;
+
+  /* ── Load CSVs (re-fetch when field changes) ── */
   useEffect(() => {
     let cancelled = false;
+    setLoading(true);
+    setError(null);
+    setSelected(null);
+    setPanelPos(null);
+    setActiveCur(null);
+    setHovCur(null);
     async function load() {
       try {
         const [bRes, cRes] = await Promise.all([
-          fetch("data/books.csv").then(r => { if (!r.ok) throw new Error("books.csv not found"); return r.text(); }),
-          fetch("data/connections.csv").then(r => { if (!r.ok) throw new Error("connections.csv not found"); return r.text(); }),
+          fetch(cfg.booksFile + "?v=" + Date.now()).then(r => { if (!r.ok) throw new Error(cfg.booksFile + " not found"); return r.text(); }),
+          fetch(cfg.connsFile + "?v=" + Date.now()).then(r => { if (!r.ok) throw new Error(cfg.connsFile + " not found"); return r.text(); }),
         ]);
         if (cancelled) return;
         const bParsed = Papa.parse(bRes, { header: true, skipEmptyLines: true });
@@ -144,11 +234,12 @@ function HoSMap() {
         const bks = bParsed.data.map(r => ({
           id: parseInt(r.id),
           a: r.author,
+          fn: r.full_name || r.author,
           t: r.title,
           yr: parseInt(r.year_published),
           h0: parseInt(r.hist_start),
           h1: parseInt(r.hist_end),
-          geo: (r.geography || "global").trim(),
+          geo: (r.geography || "global").split("|")[0].trim(),
           cur: (r.currents || "").split("|").map(s => s.trim()).filter(Boolean),
           d: r.description || "",
         }));
@@ -163,7 +254,7 @@ function HoSMap() {
     }
     load();
     return () => { cancelled = true; };
-  }, []);
+  }, [field, cfg.booksFile, cfg.connsFile]);
 
   useEffect(() => {
     const obs = new ResizeObserver(entries => {
@@ -173,36 +264,45 @@ function HoSMap() {
     return () => obs.disconnect();
   }, []);
 
-  /* ── Drag handlers for detail panel ── */
+  /* ── Drag handlers for detail panel (mouse + touch) ── */
   useEffect(() => {
+    const getXY = (e) => e.touches ? { x: e.touches[0].clientX, y: e.touches[0].clientY } : { x: e.clientX, y: e.clientY };
     const onMove = (e) => {
       if (!dragRef.current) return;
       const { startX, startY, origX, origY } = dragRef.current;
-      setPanelPos({ x: origX + e.clientX - startX, y: origY + e.clientY - startY });
+      const pt = getXY(e);
+      setPanelPos({ x: origX + pt.x - startX, y: origY + pt.y - startY });
     };
     const onUp = () => { dragRef.current = null; };
     const onKey = (e) => { if (e.key === "Escape") { setSelected(null); setPanelPos(null); } };
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
+    window.addEventListener("touchmove", onMove, { passive: true });
+    window.addEventListener("touchend", onUp);
     window.addEventListener("keydown", onKey);
-    return () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); window.removeEventListener("keydown", onKey); };
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      window.removeEventListener("touchmove", onMove);
+      window.removeEventListener("touchend", onUp);
+      window.removeEventListener("keydown", onKey);
+    };
   }, []);
   const onPanelMouseDown = (e) => {
-    // Don't drag if clicking a button or link
     if (e.target.tagName === "BUTTON") return;
-    const panelEl = e.currentTarget;
-    const rect = panelEl.getBoundingClientRect();
-    dragRef.current = { startX: e.clientX, startY: e.clientY, origX: rect.left, origY: rect.top };
+    const rect = e.currentTarget.getBoundingClientRect();
+    const pt = e.touches ? { x: e.touches[0].clientX, y: e.touches[0].clientY } : { x: e.clientX, y: e.clientY };
+    dragRef.current = { startX: pt.x, startY: pt.y, origX: rect.left, origY: rect.top };
     e.preventDefault();
   };
 
-  const m = { top: 20, right: 10, bottom: 55, left: 60 };
+  const m = isMobile ? { top: 14, right: 6, bottom: 45, left: 44 } : { top: 20, right: 10, bottom: 55, left: 60 };
   const pw = dims.w - m.left - m.right;
   const ph = dims.h - m.top - m.bottom;
+
   /* ── Density-proportional y-axis using 50-year bins ── */
   const yBinSize = 50;
   const yBins = useMemo(() => {
-    // Count books per 50-year bin based on historical midpoint
     const counts = {};
     books.forEach(b => {
       const mid = (b.h0 + b.h1) / 2;
@@ -211,22 +311,17 @@ function HoSMap() {
     });
     const binStarts = Object.keys(counts).map(Number).sort((a, b) => a - b);
     if (binStarts.length === 0) return [];
-    // Fill gaps so every 50-year period is represented
     const allBins = [];
     for (let s = binStarts[0]; s <= binStarts[binStarts.length - 1]; s += yBinSize) {
       allBins.push({ start: s, count: counts[s] || 0 });
     }
-    // Weight: proportional to max(1, count)
     const minWeight = 1;
     const totalWeight = allBins.reduce((s, b) => s + Math.max(minWeight, b.count), 0);
     const padTop = 10, padBot = 10;
     const usable = ph - padTop - padBot;
-    // y-axis is inverted: early periods (small year) at bottom (large pixel y)
-    // so bin with smallest year starts at bottom
     let cum = 0;
     allBins.forEach(bin => {
       const w = Math.max(minWeight, bin.count);
-      // y1 = bottom edge (larger pixel y), y0 = top edge (smaller pixel y)
       bin.py1 = m.top + padTop + ph - padBot - (cum / totalWeight) * usable;
       cum += w;
       bin.py0 = m.top + padTop + ph - padBot - (cum / totalWeight) * usable;
@@ -239,10 +334,9 @@ function HoSMap() {
     const bs = Math.floor(v / yBinSize) * yBinSize;
     const bin = yBins.find(b => b.start === bs);
     if (!bin) {
-      if (v < yBins[0].start) return yBins[0].py1; // below first bin = bottom
-      return yBins[yBins.length - 1].py0; // above last bin = top
+      if (v < yBins[0].start) return yBins[0].py1;
+      return yBins[yBins.length - 1].py0;
     }
-    // Interpolate within bin
     const t = (v - bin.start) / yBinSize;
     return bin.py1 + t * (bin.py0 - bin.py1);
   }, [yBins, m.top]);
@@ -250,26 +344,22 @@ function HoSMap() {
   /* ── Density-proportional x-axis using 5-year bins ── */
   const binSize = 5;
   const xBins = useMemo(() => {
-    // Count books per 5-year bin
     const counts = {};
     books.forEach(b => {
       const bs = Math.floor(b.yr / binSize) * binSize;
       counts[bs] = (counts[bs] || 0) + 1;
     });
-    // Build sorted bin list from first to last publication year bin
     const binStarts = Object.keys(counts).map(Number).sort((a, b) => a - b);
     if (binStarts.length === 0) return [];
-    // Fill from 1960 to last bin so every 5-year period is represented
     const allBins = [];
     const firstBin = 1960;
     for (let s = firstBin; s <= binStarts[binStarts.length - 1]; s += binSize) {
       allBins.push({ start: s, count: counts[s] || 0 });
     }
-    // Weight: each bin gets width proportional to max(1, count)
     const minWeight = 1;
     const totalWeight = allBins.reduce((s, b) => s + Math.max(minWeight, b.count), 0);
-    const padLeft = 0; // 1960 empty bin provides left breathing room
-    const padRight = 40; // breathing room right of last bin for labels
+    const padLeft = 0;
+    const padRight = 40;
     const usable = pw - padLeft - padRight;
     let cum = 0;
     allBins.forEach(bin => {
@@ -286,11 +376,9 @@ function HoSMap() {
     const bs = Math.floor(yr / binSize) * binSize;
     const bin = xBins.find(b => b.start === bs);
     if (!bin) {
-      // Extrapolate: before first or after last
       if (yr < xBins[0].start) return xBins[0].x0;
       return xBins[xBins.length - 1].x1;
     }
-    // Position within bin: pad 10% on each side, spread by year offset
     const pad = (bin.x1 - bin.x0) * 0.1;
     const inner = (bin.x1 - bin.x0) - pad * 2;
     const t = binSize <= 1 ? 0.5 : (yr - bin.start) / (binSize - 1);
@@ -329,9 +417,6 @@ function HoSMap() {
   const curFilter = activeCur || hovCur;
   const bookVisible = useCallback(b => !curFilter || b.cur.includes(curFilter), [curFilter]);
 
-  const xTicks = xBins.map(b => ({ year: b.start, x: (b.x0 + b.x1) / 2 }));
-  const yTicks = yBins.map(b => b.start);
-
   const activeGeos = useMemo(() => {
     const s = new Set();
     books.forEach(b => s.add(b.geo));
@@ -341,8 +426,8 @@ function HoSMap() {
   if (loading) return <div style={{ padding: 40, fontFamily: "sans-serif", color: "#888" }}>Loading CSV data…</div>;
   if (error) return <div style={{ padding: 40, fontFamily: "sans-serif", color: "#c00" }}>
     <strong>Error loading data:</strong> {error}<br/><br/>
-    Make sure <code>data/books.csv</code> and <code>data/connections.csv</code> are in the same directory as this HTML file.
-    If running locally, use a local server (<code>python -m http.server</code>) — browsers block fetch() on file:// URLs.
+    Make sure CSV files are in the data/ directory.
+    If running locally, use a local server (<code>python -m http.server</code>).
   </div>;
 
   return (
@@ -355,6 +440,10 @@ function HoSMap() {
         .chip { cursor: pointer; padding: 4px 10px; font-family: 'DM Sans', sans-serif;
           font-size: 11px; font-weight: 500; border-radius: 2px; transition: all 0.2s;
           user-select: none; white-space: nowrap; display: inline-block; }
+        @media (max-width: 767px) {
+          .chip { padding: 5px 8px; font-size: 10px; }
+          .tag { font-size: 8.5px !important; padding: 2px 5px !important; }
+        }
         .ctrl { font-family: 'DM Sans', sans-serif; font-size: 11px; color: #9a8b78;
           cursor: pointer; display: inline-flex; align-items: center; gap: 4px; user-select: none; }
         .dp { background: #fff; border: 1px solid #d4c9b8; padding: 20px 24px;
@@ -364,22 +453,39 @@ function HoSMap() {
         .ci:hover span:first-child { text-decoration: underline; }
         .tag { display: inline-block; padding: 2px 7px; border-radius: 2px; font-size: 9.5px;
           font-family: 'DM Sans', sans-serif; margin: 2px; color: #fff; }
+        .tab { font-family: 'DM Sans', sans-serif; font-size: 12px; font-weight: 500;
+          padding: 6px 16px; cursor: pointer; border: none; border-bottom: 2px solid transparent;
+          background: none; color: #9a8b78; transition: all 0.2s; }
+        .tab:hover { color: #5c4a32; }
+        .tab.active { color: #2c2417; border-bottom-color: #2c2417; }
       `}</style>
 
       {/* ── Header ── */}
-      <div style={{ padding: "14px 20px 6px", borderBottom: "1px solid #d4c9b8", flexShrink: 0 }}>
-        <h1 style={{ margin: 0, fontSize: 19, fontWeight: 700 }}>History of Modern Science Generals Books</h1>
+      <div style={{ padding: isMobile ? "10px 12px 0" : "14px 20px 0", borderBottom: "1px solid #d4c9b8", flexShrink: 0 }}>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: isMobile ? 4 : 8 }}>
+          <h1 style={{ margin: 0, fontSize: isMobile ? 15 : 19, fontWeight: 700 }}>{cfg.title}</h1>
+        </div>
 
-        <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
-          {/* <label className="ctrl"><input type="checkbox" checked={showConns} onChange={() => setShowConns(!showConns)} /> Connections</label> */}
-          {/* <label className="ctrl"><input type="checkbox" checked={showWaves} onChange={() => setShowWaves(!showWaves)} /> Waves</label> */}
+        {/* Tabs */}
+        <div style={{ display: "flex", gap: 0, marginBottom: -1, overflowX: "auto" }}>
+          {Object.entries(FIELDS).map(([k, v]) => (
+            <button key={k} className={`tab ${field === k ? "active" : ""}`}
+              style={isMobile ? { fontSize: 11, padding: "5px 10px", whiteSpace: "nowrap" } : {}}
+              onClick={() => setField(k)}>{v.label}</button>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Filters ── */}
+      <div style={{ padding: isMobile ? "6px 10px 5px" : "8px 20px 6px", borderBottom: "1px solid #d4c9b8", flexShrink: 0 }}>
+        <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
           {activeCur && <button onClick={() => setActiveCur(null)} style={{
             fontFamily: "'DM Sans', sans-serif", fontSize: 10, padding: "2px 8px", background: "#5c4a32",
             color: "#faf8f4", border: "none", borderRadius: 2, cursor: "pointer" }}>Clear ×</button>}
         </div>
 
         {/* Current chips */}
-        <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 6 }}>
+        <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 4 }}>
           {Object.entries(CURRENTS).map(([k, { label, color }]) => {
             const on = activeCur === k, hov = hovCur === k;
             return <span key={k} className="chip"
@@ -391,11 +497,11 @@ function HoSMap() {
         </div>
 
         {/* Geography legend */}
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 6, alignItems: "center" }}>
-          <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 9.5, color: "#a09080", textTransform: "uppercase", letterSpacing: "0.5px" }}>Geography:</span>
+        <div style={{ display: "flex", gap: isMobile ? 5 : 8, flexWrap: "wrap", marginTop: isMobile ? 4 : 6, alignItems: "center" }}>
+          <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: isMobile ? 8.5 : 9.5, color: "#a09080", textTransform: "uppercase", letterSpacing: "0.5px" }}>Geography:</span>
           {activeGeos.map(g => GEO[g] && (
-            <span key={g} style={{ display: "inline-flex", alignItems: "center", gap: 4, fontFamily: "'DM Sans', sans-serif", fontSize: 10.5, color: "#6b5d4f" }}>
-              <span style={{ width: 8, height: 8, borderRadius: "50%", background: GEO[g].color, display: "inline-block" }}/>
+            <span key={g} style={{ display: "inline-flex", alignItems: "center", gap: 3, fontFamily: "'DM Sans', sans-serif", fontSize: isMobile ? 9 : 10.5, color: "#6b5d4f" }}>
+              <span style={{ width: isMobile ? 6 : 8, height: isMobile ? 6 : 8, borderRadius: "50%", background: GEO[g].color, display: "inline-block" }}/>
               {GEO[g].label}
             </span>
           ))}
@@ -403,15 +509,15 @@ function HoSMap() {
       </div>
 
       {/* ── SVG ── */}
-      <div ref={containerRef} style={{ width: "100%", flex: 1, minHeight: 480, overflow: "hidden" }}>
-        <svg width={dims.w} height={dims.h} style={{ display: "block" }}>
+      <div ref={containerRef} style={{ width: "100%", flex: 1, minHeight: isMobile ? 400 : 480, overflowX: isMobile ? "auto" : "hidden", overflowY: "hidden", WebkitOverflowScrolling: "touch" }}>
+        <svg width={isMobile ? Math.max(dims.w, 600) : dims.w} height={dims.h} style={{ display: "block" }}>
 
-          {/* Grid — vertical lines at bin boundaries + labels at bin centers */}
+          {/* Grid */}
           {xBins.map((bin, i) => <g key={`xb${bin.start}`}>
             <line x1={bin.x0} x2={bin.x0} y1={m.top - 5} y2={dims.h - m.bottom} stroke="#ede6da" strokeWidth={0.5}/>
             {i === xBins.length - 1 && <line x1={bin.x1} x2={bin.x1} y1={m.top - 5} y2={dims.h - m.bottom} stroke="#ede6da" strokeWidth={0.5}/>}
-            <text x={(bin.x0 + bin.x1) / 2} y={dims.h - m.bottom + 16} textAnchor="middle"
-              style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10, fill: "#b0a090" }}>
+            <text x={(bin.x0 + bin.x1) / 2} y={dims.h - m.bottom + (isMobile ? 13 : 16)} textAnchor="middle"
+              style={{ fontFamily: "'DM Sans', sans-serif", fontSize: isMobile ? 8 : 10, fill: "#b0a090" }}>
               {"'" + String(bin.start).slice(2)}
             </text>
           </g>)}
@@ -419,22 +525,20 @@ function HoSMap() {
             <line x1={m.left} x2={dims.w - m.right} y1={bin.py1} y2={bin.py1} stroke="#ede6da" strokeWidth={0.5}/>
             {i === yBins.length - 1 && <line x1={m.left} x2={dims.w - m.right} y1={bin.py0} y2={bin.py0} stroke="#ede6da" strokeWidth={0.5}/>}
             <text x={m.left - 4} y={(bin.py0 + bin.py1) / 2 + 3.5} textAnchor="end"
-              style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10, fill: "#b0a090" }}>{bin.start}</text>
+              style={{ fontFamily: "'DM Sans', sans-serif", fontSize: isMobile ? 8 : 10, fill: "#b0a090" }}>{bin.start}</text>
           </g>)}
 
           {/* Axis labels */}
-          <text x={m.left + pw / 2} y={dims.h - 6} textAnchor="middle"
-            style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10.5, fill: "#8b7a65", fontWeight: 500, letterSpacing: "1px" }}>
+          <text x={m.left + pw / 2} y={dims.h - (isMobile ? 3 : 6)} textAnchor="middle"
+            style={{ fontFamily: "'DM Sans', sans-serif", fontSize: isMobile ? 9 : 10.5, fill: "#8b7a65", fontWeight: 500, letterSpacing: "1px" }}>
             YEAR PUBLISHED</text>
-          <text x={14} y={m.top + ph / 2} textAnchor="middle" transform={`rotate(-90, 14, ${m.top + ph / 2})`}
-            style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10.5, fill: "#8b7a65", fontWeight: 500, letterSpacing: "1px" }}>
+          <text x={isMobile ? 10 : 14} y={m.top + ph / 2} textAnchor="middle" transform={`rotate(-90, ${isMobile ? 10 : 14}, ${m.top + ph / 2})`}
+            style={{ fontFamily: "'DM Sans', sans-serif", fontSize: isMobile ? 9 : 10.5, fill: "#8b7a65", fontWeight: 500, letterSpacing: "1px" }}>
             HISTORICAL PERIOD</text>
 
           {/* Waves */}
           {showWaves && WAVES.map((w, i) => <g key={i} opacity={0.06}>
             <rect x={xScale(w.y0)} y={m.top} width={xScale(w.y1) - xScale(w.y0)} height={ph} fill={w.color}/>
-            {/*<text x={xScale(w.y0) + 3} y={m.top + 12} textAnchor="start"
-              style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 9, fill: w.color, fontWeight: 600, opacity: 8 }}>{w.label}</text>*/}
           </g>)}
 
           {/* Range bars */}
@@ -463,39 +567,95 @@ function HoSMap() {
             const p = positions[b.id]; if (!p) return null;
             const lp = labelPositions[b.id];
             const isSel = selected === b.id;
+            const isHov = hovered === b.id;
             const isConn = connIds.has(b.id);
             const vis = bookVisible(b);
             const act = (!selected || isSel || isConn) && vis;
             const gc = GEO[b.geo]?.color || "#888";
-            const r = isSel ? 7 : isConn ? 5.5 : 4;
-            return <g key={b.id} className="nd" onClick={() => { setSelected(isSel ? null : b.id); setPanelPos(null); }}>
-              <circle cx={p.x} cy={p.y} r={r + 5} fill="transparent"/>
+            const r = isMobile
+              ? (isSel ? 8 : isConn ? 6.5 : 5.5)
+              : (isSel ? 7 : isConn ? 5.5 : isHov ? 5 : 4);
+            const labelEndX = lp ? (lp.anchor === "end" ? lp.x : lp.x) : 0;
+            const showLeader = lp && lp.drift > 18;
+            return <g key={b.id} className="nd"
+              onClick={() => { setSelected(isSel ? null : b.id); setPanelPos(null); }}
+              onMouseEnter={() => setHovered(b.id)} onMouseLeave={() => setHovered(null)}>
+              <circle cx={p.x} cy={p.y} r={r + (isMobile ? 10 : 5)} fill="transparent"/>
               {isSel && <circle cx={p.x} cy={p.y} r={r + 3} fill={gc} opacity={0.14}/>}
+              {showLeader && !isMobile && <line x1={p.x} y1={p.y} x2={lp.anchor === "end" ? lp.x + lp.w : lp.x} y2={lp.y}
+                stroke="#d4c9b8" strokeWidth={0.5} opacity={act ? 0.4 : 0.08}/>}
               <circle cx={p.x} cy={p.y} r={r} fill={gc}
                 stroke={isSel ? "#2c2417" : "none"} strokeWidth={2} opacity={act ? 1 : 0.1}/>
-              {lp && <text x={lp.x} y={lp.y + 3.5} textAnchor={lp.anchor === "end" ? "end" : "start"}
-                style={{ fontFamily: "'DM Sans', sans-serif", fontSize: isSel ? 11 : 9.5,
-                  fontWeight: isSel ? 600 : 400, fill: act ? "#2c2417" : "#d4c9b8",
-                  pointerEvents: "none" }}>{b.a}</text>}
+              {lp && !isMobile && <text x={lp.x} y={lp.y + 3}
+                textAnchor={lp.anchor === "end" ? "end" : "start"}
+                style={{ fontFamily: "'DM Sans', sans-serif", fontSize: isSel || isHov ? 10 : 8,
+                  fontWeight: isSel || isHov ? 600 : 400, fill: act ? "#2c2417" : "#d4c9b8",
+                  pointerEvents: "none",
+                  ...(isHov ? { paintOrder: "stroke", stroke: "#faf8f4", strokeWidth: 3 } : {})
+                }}>{b.a}</text>}
+              {isMobile && isSel && lp && <text x={p.x} y={p.y - 10}
+                textAnchor="middle"
+                style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 9, fontWeight: 600,
+                  fill: "#2c2417", pointerEvents: "none",
+                  paintOrder: "stroke", stroke: "#faf8f4", strokeWidth: 3 }}>{b.a}</text>}
             </g>;
           })}
         </svg>
       </div>
 
-      {/* ── Detail panel (positioned near dot) ── */}
+      {/* ── Detail panel ── */}
       {selBook && (() => {
         const p = positions[selBook.id];
         if (!p) return null;
+
+        /* Mobile: bottom sheet with overlay */
+        if (isMobile) {
+          return <>
+            <div onClick={() => { setSelected(null); setPanelPos(null); }} style={{
+              position: "fixed", inset: 0, background: "rgba(0,0,0,0.25)", zIndex: 9 }}/>
+            <div className="dp" onTouchStart={onPanelMouseDown} style={{
+              position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 10,
+              background: "#fff", borderTop: "1px solid #d4c9b8", padding: "14px 16px 20px",
+              boxShadow: "0 -4px 20px rgba(0,0,0,0.12)", maxHeight: "55vh", overflowY: "auto",
+              borderRadius: "12px 12px 0 0",
+            }}>
+              <div style={{ width: 36, height: 4, background: "#d4c9b8", borderRadius: 2, margin: "0 auto 10px" }}/>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <div>
+                  <h2 style={{ margin: 0, fontSize: 14, lineHeight: 1.3 }}>{selBook.fn}, <em>{selBook.t}</em></h2>
+                  <p style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, color: "#8b7a65", margin: "3px 0" }}>
+                    Published {selBook.yr} · Covers {selBook.h0}–{selBook.h1} ·&nbsp;
+                    <span style={{ color: GEO[selBook.geo]?.color }}>{GEO[selBook.geo]?.label || selBook.geo}</span>
+                  </p>
+                </div>
+                <button onClick={() => setSelected(null)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 22, color: "#b0a090", lineHeight: 1 }}>×</button>
+              </div>
+              <p style={{ fontSize: 12.5, lineHeight: 1.55, margin: "8px 0" }}>{selBook.d}</p>
+              <div>{selBook.cur.map(c => <span key={c} className="tag" style={{ background: CURRENTS[c]?.color || "#888" }}>{CURRENTS[c]?.label || c}</span>)}</div>
+              {connIds.size > 0 && <div style={{ borderTop: "1px solid #e8dfd2", marginTop: 10, paddingTop: 8 }}>
+                <p style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 9.5, color: "#9a8b78", margin: "0 0 4px", textTransform: "uppercase", letterSpacing: "0.5px", fontWeight: 600 }}>Connections</p>
+                {connections.filter(([a, b]) => a === selected || b === selected).map(([a, b, label], i) => {
+                  const oId = a === selected ? b : a;
+                  const o = books.find(bk => bk.id === oId);
+                  if (!o) return null;
+                  return <div key={i} className="ci" onClick={() => setSelected(oId)} style={{ color: "#6b5d4f" }}>
+                    <span style={{ color: GEO[o.geo]?.color, fontWeight: 600 }}>{o.a}</span>
+                    <span style={{ color: "#b0a090" }}> — {label}</span>
+                  </div>;
+                })}
+              </div>}
+            </div>
+          </>;
+        }
+
+        /* Desktop: floating draggable panel near dot */
         const panelW = 420, panelH = 280;
-        // Position to the right of the dot by default; flip left if near right edge
         const gap = 18;
         let left = p.x + gap;
         if (left + panelW > dims.w - 20) left = p.x - panelW - gap;
-        // Vertically center on the dot, but clamp to stay on screen
         const headerH = containerRef.current ? containerRef.current.getBoundingClientRect().top : 0;
         let top = p.y - panelH / 2 + headerH;
         top = Math.max(headerH + 8, Math.min(top, headerH + dims.h - panelH - 8));
-        // Use dragged position if available
         const finalLeft = panelPos ? panelPos.x : left;
         const finalTop = panelPos ? panelPos.y : top;
         return <div className="dp" onMouseDown={onPanelMouseDown} style={{
@@ -506,7 +666,7 @@ function HoSMap() {
         }}>
           <div style={{ display: "flex", justifyContent: "space-between" }}>
             <div>
-              <h2 style={{ margin: 0, fontSize: 14, lineHeight: 1.3 }}>{selBook.a}, <em>{selBook.t}</em></h2>
+              <h2 style={{ margin: 0, fontSize: 14, lineHeight: 1.3 }}>{selBook.fn}, <em>{selBook.t}</em></h2>
               <p style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, color: "#8b7a65", margin: "3px 0" }}>
                 Published {selBook.yr} · Covers {selBook.h0}–{selBook.h1} ·&nbsp;
                 <span style={{ color: GEO[selBook.geo]?.color }}>{GEO[selBook.geo]?.label || selBook.geo}</span>
@@ -534,7 +694,7 @@ function HoSMap() {
   );
 }
 
-ReactDOM.createRoot(document.getElementById('root')).render(<HoSMap />);
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
 </script>
 </body>
 </html>
